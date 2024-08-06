@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Interviewer</title>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        body {
+    font-family: 'Inter', sans-serif;
+    line-height: 1.6;
+    color: #333;
+    margin: 0;
+    padding: 0;
+    background-color: #f7f7f8;
+}
+
+.container {
+    display: flex;
+    height: 100vh;
+}
+
+.sidebar {
+    width: 260px;
+    background-color: #202123;
+    color: #fff;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+}
+
+.sidebar h1 {
+    font-size: 20px;
+    margin-bottom: 20px;
+}
+
+.sidebar button {
+    background-color: #343541;
+    color: #fff;
+    border: none;
+    padding: 10px 15px;
+    margin-bottom: 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.3s;
+}
+
+.sidebar button:hover {
+    background-color: #40414f;
+}
+
+.chat-container {
+    flex-grow: 1;
+    display: flex;
+    flex-direction: column;
+    background-color: #ffffff;
+}
+
+#conversation {
+    flex-grow: 1;
+    overflow-y: auto;
+    padding: 20px;
+}
+
+.input-area {
+    display: flex;
+    padding: 20px;
+    background-color: #ffffff;
+    border-top: 1px solid #e5e5e5;
+}
+
+#response-input {
+    flex-grow: 1;
+    padding: 10px;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    font-size: 16px;
+}
+
+#respond, #voice-input {
+    background-color: #fff;
+    border: 1px solid #d1d5db;
+    padding: 10px 15px;
+    margin-left: 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.3s;
+}
+
+#respond:hover, #voice-input:hover {
+    background-color: #f3f4f6;
+}
+
+#voice-input svg {
+    width: 24px;
+    height: 24px;
+}
+
+.message {
+    margin-bottom: 20px;
+    padding: 10px 15px;
+    border-radius: 4px;
+    max-width: 80%;
+}
+
+.interviewer {
+    background-color: #f7f7f8;
+    align-self: flex-start;
+}
+
+.candidate {
+    background-color: #e7f3ff;
+    align-self: flex-end;
+}
+
+#evaluation-result {
+    margin-top: 20px;
+    padding: 20px;
+    background-color: #fff;
+    border-radius: 4px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24);
+}
+
+.upload-area {
+    margin-bottom: 20px;
+}
+
+.upload-area input[type="file"] {
+    display: block;
+    margin-bottom: 10px;
+    color: #fff;
+}
+#voice-input.active {
+    background-color: #059669;
+    color: white;
+}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="sidebar">
+            <h1>AI Interviewer</h1>
+            <div id="upload-area" class="upload-area">
+                <h2>Upload Files</h2>
+                <input type="file" id="resume-upload" accept=".pdf,.doc,.docx,.txt">
+                <input type="file" id="jd-upload" accept=".pdf,.doc,.docx,.txt">
+                <button id="upload-files">Upload Files</button>
+            </div>
+            <button id="start-interview">Start Interview</button>
+            <button id="evaluate" style="display:none;">Get Evaluation</button>
+        </div>
+        <div class="chat-container">
+            <div id="conversation"></div>
+            <div class="input-area">
+                <input type="text" id="response-input" placeholder="Type your response...">
+                <button id="respond">Send</button>
+                <button id="voice-input">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6">
+                        <path d="M8.25 4.5a3.75 3.75 0 117.5 0v8.25a3.75 3.75 0 11-7.5 0V4.5z" />
+                        <path d="M6 10.5a.75.75 0 01.75.75v1.5a5.25 5.25 0 1010.5 0v-1.5a.75.75 0 011.5 0v1.5a6.751 6.751 0 01-6 6.709v2.291h3a.75.75 0 010 1.5h-7.5a.75.75 0 010-1.5h3v-2.291a6.751 6.751 0 01-6-6.709v-1.5A.75.75 0 016 10.5z" />
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </div>
+    <div id="evaluation-result"></div>
+    <script>
+        let interviewHistory = "";
+let remainingQuestions = [];
+let unansweredQuestions = 0;
+let recognition;
+let isListening = false;
+let candidateResponses = [];
+
+if ('webkitSpeechRecognition' in window) {
+    recognition = new webkitSpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+
+    recognition.onresult = function(event) {
+        let finalTranscript = '';
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+            if (event.results[i].isFinal) {
+                finalTranscript += event.results[i][0].transcript;
+            }
+        }
+        if (finalTranscript !== '') {
+            $('#response-input').val($('#response-input').val() + ' ' + finalTranscript);
+        }
+    };
+
+    recognition.onend = function() {
+        if (isListening) {
+            recognition.start();
+        }
+    };
+
+    recognition.onerror = function(event) {
+        console.error('Speech recognition error:', event.error);
+        if (event.error === 'no-speech') {
+            if (isListening) {
+                recognition.stop();
+                setTimeout(() => recognition.start(), 100);
+            }
+        }
+    };
+
+    $('#voice-input').on('click', function() {
+        if (!isListening) {
+            isListening = true;
+            recognition.start();
+            $(this).addClass('active');
+        } else {
+            stopVoiceInput();
+        }
+    });
+} else {
+    $('#voice-input').hide();
+    console.log('Web Speech API is not supported in this browser.');
+}
+
+function stopVoiceInput() {
+    if (isListening) {
+        isListening = false;
+        recognition.stop();
+        $('#voice-input').removeClass('active');
+    }
+}
+
+function deleteAudioFiles() {
+    $.ajax({
+        url: '/delete_audio_files',
+        type: 'POST',
+        success: function(response) {
+            console.log('Audio files deleted successfully');
+        },
+        error: function(xhr) {
+            console.error('Error deleting audio files:', xhr.responseJSON.error);
+        }
+    });
+}
+
+$('#upload-files').click(function() {
+    var formData = new FormData();
+    formData.append('resume', $('#resume-upload')[0].files[0]);
+    formData.append('jd', $('#jd-upload')[0].files[0]);
+    
+    $.ajax({
+        url: '/upload',
+        type: 'POST',
+        data: formData,
+        processData: false,
+        contentType: false,
+        success: function(response) {
+            alert(response.message);
+            remainingQuestions = response.questions;
+            $('#start-interview').show();
+        },
+        error: function(xhr) {
+            alert('Error uploading files: ' + xhr.responseJSON.error);
+        }
+    });
+});
+
+$('#start-interview').click(function() {
+    $.ajax({
+        url: '/start_interview',
+        type: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({questions: remainingQuestions}),
+        success: function(data) {
+            $('#conversation').append('<div class="message interviewer"><strong>Question ' + data.question_number + ':</strong> ' + data.question_text + '</div>');
+            interviewHistory += "Interviewer: " + data.question_number + ". " + data.question_text + "\n";
+            remainingQuestions = data.remaining_questions;
+            new Audio(data.audio).play().catch(e => console.error("Audio playback error:", e));
+            
+            if (data.is_last_question) {
+                $('#evaluate').show();
+            }
+        },
+        error: function(xhr) {
+            alert('Error starting interview: ' + xhr.responseJSON.error);
+        }
+    });
+});
+
+$('#respond').click(function() {
+    let response = $('#response-input').val();
+    if (response.trim() === '') {
+        alert("Please provide an answer before continuing.");
+        return;
+    }
+    $('#conversation').append('<div class="message candidate">You: ' + response + '</div>');
+    interviewHistory += "Candidate: " + response + "\n";
+    candidateResponses.push(response);
+
+    $.ajax({
+        url: '/continue_interview',
+        type: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({
+            response: response, 
+            history: interviewHistory,
+            remaining_questions: remainingQuestions
+        }),
+        success: function(data) {
+            if (data.question_number && data.question_text) {
+                $('#conversation').append('<div class="message interviewer"><strong>Question ' + data.question_number + ':</strong> ' + data.question_text + '</div>');
+                interviewHistory += "Interviewer: " + data.question_number + ". " + data.question_text + "\n";
+            } else {
+                $('#conversation').append('<div class="message interviewer">' + data.message + '</div>');
+                interviewHistory += "Interviewer: " + data.message + "\n";
+            }
+            
+            remainingQuestions = data.remaining_questions;
+            
+            stopVoiceInput();
+            
+            new Audio(data.audio).play().catch(e => console.error("Audio playback error:", e));
+            
+            if (data.is_last_question) {
+                $('#evaluate').show();
+            }
+            
+            if (data.interview_completed) {
+                $('#respond').hide();
+                $('#voice-input').hide();
+                $('#evaluate').show();
+                stopVoiceInput();
+            }
+        },
+        error: function(xhr) {
+            alert('Error continuing interview: ' + xhr.responseJSON.error);
+        }
+    });
+
+    $('#response-input').val('');
+});
+
+$('#evaluate').click(function() {
+    if (remainingQuestions.length > 0) {
+        alert("Please answer all questions before requesting an evaluation.");
+        return;
+    }
+    
+    $.ajax({
+        url: '/evaluate',
+        type: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({
+            history: interviewHistory,
+            unanswered_questions: unansweredQuestions,
+            candidate_responses: candidateResponses
+        }),
+        success: function(data) {
+            $('#evaluation-result').html('<h2>Evaluation</h2><pre>' + data.evaluation + '</pre>');
+            deleteAudioFiles();
+        },
+        error: function(xhr) {
+            alert('Error getting evaluation: ' + xhr.responseJSON.error);
+        }
+    });
+});
+
+// Auto-scroll to the bottom of the conversation
+function scrollToBottom() {
+    const conversationDiv = document.getElementById('conversation');
+    conversationDiv.scrollTop = conversationDiv.scrollHeight;
+}
+
+// Call this function after appending new messages
+$('#conversation').on('DOMNodeInserted', scrollToBottom);
+
+// Enable sending response with Enter key
+$('#response-input').keypress(function(e) {
+    if(e.which == 13) { // Enter key
+        $('#respond').click();
+    }
+});
+    </script>
+</body>
+</html>
